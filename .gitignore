@@ -1,0 +1,43 @@
+# Sistema/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.zed/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+.env
+
+# Arduino / ESP32
+.pio/
+firmware/caixa_termica_simulador_esp32/
+*.bin
+*.elf
+*.map
+*.hex
+*.eep
+*.lst
+
+# Segredos locais
+AGENTS.md
+config.h
+secrets.h
+*.local
+.my.cnf
+
+# Evidencias locais
+evidence/
+
+# Relatórios gerados
+*.pdf
+*.docx
+~$*
+*.tmp
+*.bak
+*.aux
+*.log
