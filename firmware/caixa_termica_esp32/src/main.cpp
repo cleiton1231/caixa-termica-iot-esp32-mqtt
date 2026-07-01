@@ -11,6 +11,7 @@ const int I2C_SDA_PIN = 21;
 const int I2C_SCL_PIN = 22;
 
 const unsigned long SENSOR_INTERVAL_MS = 1000;
+const unsigned long MPU_RETRY_INTERVAL_MS = 5000;
 
 OneWire oneWire(DS18B20_DATA_PIN);
 DallasTemperature ds18b20(&oneWire);
@@ -18,6 +19,7 @@ Adafruit_MPU6050 mpu;
 
 bool mpuDisponivel = false;
 unsigned long ultimoCicloSensores = 0;
+unsigned long ultimaTentativaMpu = 0;
 
 struct LeiturasSensores {
   float temperatura_c;
@@ -36,6 +38,8 @@ struct LeiturasSensores {
 void iniciarDs18b20();
 void iniciarLdrDigital();
 void iniciarMpu6050();
+int escanearI2c();
+void tentarReconectarMpu6050();
 LeiturasSensores lerSensores();
 void imprimirLeiturasSerial(const LeiturasSensores &leituras);
 
@@ -52,8 +56,13 @@ void iniciarLdrDigital() {
 void iniciarMpu6050() {
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
+  int dispositivosEncontrados = escanearI2c();
+  if (dispositivosEncontrados == 0) {
+    Serial.println("Verifique VCC 3V3, GND, SDA GPIO 21 e SCL GPIO 22.");
+  }
+
   // XDA, XCL, AD0 e INT nao sao usados nesta montagem inicial.
-  if (mpu.begin()) {
+  if (mpu.begin(0x68) || mpu.begin(0x69)) {
     mpuDisponivel = true;
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
@@ -63,6 +72,46 @@ void iniciarMpu6050() {
     mpuDisponivel = false;
     Serial.println("Erro: MPU6050 nao encontrado no barramento I2C.");
   }
+}
+
+int escanearI2c() {
+  int encontrados = 0;
+
+  Serial.println("Escaneando barramento I2C...");
+  for (byte endereco = 1; endereco < 127; endereco++) {
+    Wire.beginTransmission(endereco);
+    byte erro = Wire.endTransmission();
+
+    if (erro == 0) {
+      Serial.print("Dispositivo I2C encontrado em 0x");
+      if (endereco < 16) {
+        Serial.print("0");
+      }
+      Serial.println(endereco, HEX);
+      encontrados++;
+    }
+  }
+
+  if (encontrados == 0) {
+    Serial.println("Nenhum dispositivo I2C encontrado.");
+  }
+
+  return encontrados;
+}
+
+void tentarReconectarMpu6050() {
+  if (mpuDisponivel) {
+    return;
+  }
+
+  unsigned long agora = millis();
+  if (agora - ultimaTentativaMpu < MPU_RETRY_INTERVAL_MS) {
+    return;
+  }
+  ultimaTentativaMpu = agora;
+
+  Serial.println("Tentando detectar MPU6050 novamente...");
+  iniciarMpu6050();
 }
 
 LeiturasSensores lerSensores() {
@@ -146,6 +195,8 @@ void setup() {
 }
 
 void loop() {
+  tentarReconectarMpu6050();
+
   unsigned long agora = millis();
   if (agora - ultimoCicloSensores >= SENSOR_INTERVAL_MS) {
     ultimoCicloSensores = agora;
