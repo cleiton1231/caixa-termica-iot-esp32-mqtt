@@ -46,32 +46,29 @@ Broker MQTT test.mosquitto.org:1883
 
 ## Como configurar o firmware principal
 
-O firmware principal fica em `firmware/caixa_termica_esp32` e usa PlatformIO com `board = esp32dev` e framework Arduino.
+O firmware principal fica em `firmware/caixa_termica_esp32` e usa PlatformIO com `board = esp32dev` e framework Arduino. A versao atual e de teste dos sensores via Serial Monitor; a integracao MQTT fica para a proxima etapa.
 
 1. Instale o PlatformIO.
-2. Copie `firmware/caixa_termica_esp32/include/config.example.h` para `firmware/caixa_termica_esp32/include/config.h`.
-3. Preencha `WIFI_SSID` e `WIFI_PASSWORD` no `config.h`.
-4. Mantenha `MQTT_BROKER` como `test.mosquitto.org` e `MQTT_PORT` como `1883`, salvo necessidade de teste local.
-5. Compile:
+2. Compile:
 
 ```bash
 cd firmware/caixa_termica_esp32
 pio run
 ```
 
-6. Grave no ESP32:
+3. Grave no ESP32:
 
 ```bash
 pio run --target upload
 ```
 
-7. Abra o monitor serial:
+4. Abra o monitor serial:
 
 ```bash
 pio device monitor
 ```
 
-O arquivo `config.h` contem credenciais locais e esta ignorado pelo Git.
+O arquivo `config.h` sera usado novamente quando Wi-Fi/MQTT forem reativados. Credenciais locais devem continuar fora do Git.
 
 ## Como configurar o banco
 
@@ -147,7 +144,7 @@ O `include/config.h` do simulador tambem e local e ignorado pelo Git.
 | Topico | Uso |
 |---|---|
 | `iot/caixa_termica/telemetria/temperatura` | Temperatura em graus Celsius |
-| `iot/caixa_termica/telemetria/luminosidade` | Valor analogico do LDR |
+| `iot/caixa_termica/telemetria/luminosidade` | Valor digital do LDR, `0` ou `1` |
 | `iot/caixa_termica/telemetria/aceleracao` | Aceleracao total calculada |
 | `iot/caixa_termica/status/tampa` | Estado estimado da tampa |
 | `iot/caixa_termica/status/estado` | Estado geral do sistema |

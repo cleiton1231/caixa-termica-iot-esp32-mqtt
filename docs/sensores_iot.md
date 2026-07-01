@@ -7,7 +7,7 @@ Este documento registra os sensores usados no projeto da caixa térmica IoT, sua
 | Sensor | Função no projeto | Comunicação / Saída | Tensão | Observação principal |
 |---|---|---|---|---|
 | MPU-6050 / GY-521 | Impacto, inclinação e vibração da caixa | I2C | 3 V a 5 V | Mede aceleração e rotação em 3 eixos |
-| LDR com LM393 | Detecção de abertura por entrada de luz | Digital e, em alguns módulos, analógica | normalmente 3,3 V ou 5 V | O firmware atual usa a saída analógica no GPIO 34 |
+| LDR com LM393 | Detecção de abertura por entrada de luz | Digital | normalmente 3,3 V ou 5 V | O firmware atual usa a saída digital no GPIO 27 |
 | DS18B20 à prova d’água | Temperatura interna da caixa térmica | 1-Wire | 3 V a 5,5 V | Precisa de resistor pull-up de 4,7 kΩ no barramento de dados |
 
 ---
@@ -178,7 +178,7 @@ Não use o MPU-6050 como sensor de umidade ou temperatura externa. Ele até poss
 
 O LDR é um resistor dependente de luz. Quando a luminosidade aumenta, sua resistência diminui. O módulo com LM393 compara essa leitura com um limite ajustado no trimpot e gera uma saída digital.
 
-Ele pode indicar se há luz suficiente, sombra, escuro ou alteração brusca de luminosidade.
+No firmware atual, ele é tratado apenas como sensor digital. A leitura é binária: `0` ou `1`.
 
 ## Onde usar no projeto
 
@@ -193,7 +193,7 @@ Exemplos de aplicação:
 
 ## Pinos comuns do módulo
 
-Alguns módulos têm 3 pinos, outros têm 4 pinos.
+Alguns módulos têm 3 pinos, outros têm 4 pinos. Nesta etapa, use apenas a saída digital `DO` ou `OUT`.
 
 ### Módulo com 3 pinos
 
@@ -210,7 +210,7 @@ Alguns módulos têm 3 pinos, outros têm 4 pinos.
 | VCC | Alimentação |
 | GND | Terra |
 | DO | Saída digital |
-| AO | Saída analógica |
+| AO | Saída analógica, não usada nesta etapa |
 
 ## Ligação com ESP32
 
@@ -224,18 +224,6 @@ Alguns módulos têm 3 pinos, outros têm 4 pinos.
 
 Use alimentação em 3,3 V no ESP32. Se alimentar o módulo com 5 V, a saída digital pode ir para 5 V e isso não é seguro para GPIO do ESP32.
 
-Esta ligação é útil para teste isolado do módulo. O firmware principal do projeto não usa a saída digital do LDR.
-
-### Usando saída analógica, se o módulo tiver AO
-
-| LDR | ESP32 |
-|---|---|
-| VCC | 3V3 |
-| GND | GND |
-| AO | GPIO 34 |
-
-GPIO 34 é somente entrada, o que é adequado para leitura analógica.
-
 Esta é a ligação usada pelo firmware principal em `firmware/caixa_termica_esp32/src/main.cpp`.
 
 ## Ligação com Arduino Uno
@@ -245,7 +233,7 @@ Esta é a ligação usada pelo firmware principal em `firmware/caixa_termica_esp
 | VCC | 5V |
 | GND | GND |
 | DO | D7 |
-| AO | A0, se existir |
+| AO | não usado nesta etapa |
 
 ## Ajuste do trimpot
 
@@ -283,50 +271,18 @@ void loop() {
 
 Dependendo do módulo e do ajuste do trimpot, `0` pode significar claro ou escuro. Teste na prática e documente no código.
 
-## Exemplo com saída analógica no ESP32
-
-```cpp
-const int PIN_LDR_ANALOGICO = 34;
-
-void setup() {
-    Serial.begin(115200);
-}
-
-void loop() {
-    int leitura = analogRead(PIN_LDR_ANALOGICO);
-
-    Serial.print("LDR analogico: ");
-    Serial.println(leitura);
-
-    delay(1000);
-}
-```
-
-No ESP32, o ADC normalmente retorna valores entre `0` e `4095`.
-
 ## Dados que vale salvar/enviar
 
-Para saída digital:
-
 ```json
 {
   "sensor": "ldr",
-  "luminosidade_estado": 1
-}
-```
-
-Para saída analógica:
-
-```json
-{
-  "sensor": "ldr",
-  "luminosidade_raw": 2630
+  "luminosidade_digital": 1
 }
 ```
 
 ## Cuidados
 
-A saída digital do LDR é boa para decisão simples, mas ruim para medir luminosidade de verdade. Para gráfico e análise, prefira a saída analógica se o módulo tiver `AO`.
+A saída digital do LDR é boa para decisão simples de abertura/fechamento. Ela não mede intensidade de luz; só indica se passou ou não do limiar ajustado no trimpot.
 
 ---
 
@@ -459,8 +415,7 @@ Esta pinagem evita conflito entre sensores e mantém o projeto organizado.
 | SDA I2C | MPU-6050 | GPIO 21 |
 | SCL I2C | MPU-6050 | GPIO 22 |
 | DATA 1-Wire | DS18B20 | GPIO 4 |
-| Analog OUT | LDR | GPIO 34 |
-| Digital OUT | LDR, se existir | GPIO 27 para teste isolado, não usado no firmware principal |
+| Digital OUT | LDR | GPIO 27 |
 
 Resumo:
 
@@ -480,8 +435,7 @@ Resistor 4,7 kΩ entre DATA e 3V3
 LDR:
 VCC -> 3V3
 GND -> GND
-AO -> GPIO 34
-DO -> GPIO 27, apenas se for testar a saída digital separadamente
+DO -> GPIO 27
 ```
 
 ---
@@ -561,9 +515,9 @@ leitura muda ao tocar na ponta metálica
 Validar:
 
 ```text
-valor analógico muda com caixa fechada e tampa aberta
-valor fica entre 0 e 4095 no ESP32
-saída digital e trimpot mudam com luz/sombra, se o módulo tiver DO
+valor digital muda com caixa fechada e tampa aberta
+valor lido fica em 0 ou 1
+trimpot ajusta o ponto de mudança da saída digital
 ```
 
 ## Etapa 3: testar MPU-6050
@@ -585,7 +539,7 @@ O firmware atual publica os dados em tópicos MQTT separados, com payloads em te
 | Tópico | Exemplo de payload | Sensor / estado |
 |---|---|---|
 | `iot/caixa_termica/telemetria/temperatura` | `5.80` | DS18B20 |
-| `iot/caixa_termica/telemetria/luminosidade` | `2450` | LDR analógico |
+| `iot/caixa_termica/telemetria/luminosidade` | `1` | LDR digital |
 | `iot/caixa_termica/telemetria/aceleracao` | `10.12` | MPU6050, aceleração total |
 | `iot/caixa_termica/status/tampa` | `TAMPA_ABERTA` | Estado estimado pela luminosidade |
 | `iot/caixa_termica/status/estado` | `NORMAL` | Estado geral classificado pelo firmware |
@@ -596,7 +550,7 @@ Se o projeto evoluir para payload JSON unificado, um formato possível seria:
 {
   "device_id": "caixa-termica-esp32",
   "temperatura_c": 5.8,
-  "luminosidade_raw": 2450,
+  "luminosidade_digital": 1,
   "aceleracao_ms2": 10.12,
   "tampa": "TAMPA_ABERTA",
   "estado": "ALERTA_ABERTURA"

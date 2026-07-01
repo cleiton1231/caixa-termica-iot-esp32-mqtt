@@ -1,289 +1,155 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include <math.h>
-
-#include "config.h"
-
-#ifndef WIFI_SSID
-#error "Crie firmware/caixa_termica_esp32/include/config.h a partir de include/config.example.h"
-#endif
 
 const int DS18B20_DATA_PIN = 4;
-const int LDR_PIN = 34;
-const int BUZZER_PIN = 25;
-const int LED_PIN = 2;
+const int LDR_DIGITAL_PIN = 27;
 const int I2C_SDA_PIN = 21;
 const int I2C_SCL_PIN = 22;
 
-const float TEMPERATURA_MIN_C = 2.0;
-const float TEMPERATURA_MAX_C = 8.0;
-const int LIMIAR_LUMINOSIDADE = 2200;
-const float LIMIAR_ACELERACAO_MS2 = 16.0;
-const float ACELERACAO_GRAVIDADE_MS2 = 9.81;
+const unsigned long SENSOR_INTERVAL_MS = 1000;
 
-const unsigned long SENSOR_INTERVAL_MS = 3000;
-const unsigned long WIFI_RETRY_INTERVAL_MS = 5000;
-const unsigned long MQTT_RETRY_INTERVAL_MS = 5000;
-
-const char *TOPICO_TEMP = "iot/caixa_termica/telemetria/temperatura";
-const char *TOPICO_LUZ = "iot/caixa_termica/telemetria/luminosidade";
-const char *TOPICO_ACEL = "iot/caixa_termica/telemetria/aceleracao";
-const char *TOPICO_TAMPA = "iot/caixa_termica/status/tampa";
-const char *TOPICO_ESTADO = "iot/caixa_termica/status/estado";
-const char *TOPICO_ALERTA_TEMP = "iot/caixa_termica/alerta/temperatura";
-const char *TOPICO_ALERTA_ABERTURA = "iot/caixa_termica/alerta/abertura";
-const char *TOPICO_ALERTA_IMPACTO = "iot/caixa_termica/alerta/impacto";
-const char *TOPICO_CMD_BUZZER = "iot/caixa_termica/comando/buzzer";
-const char *TOPICO_CMD_RESET = "iot/caixa_termica/comando/reset_alerta";
-
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
 OneWire oneWire(DS18B20_DATA_PIN);
 DallasTemperature ds18b20(&oneWire);
 Adafruit_MPU6050 mpu;
 
 bool mpuDisponivel = false;
-bool buzzerForcado = false;
-bool buzzerSilenciado = false;
 unsigned long ultimoCicloSensores = 0;
-unsigned long ultimaTentativaWifi = 0;
-unsigned long ultimaTentativaMqtt = 0;
 
-enum EstadoSistema {
-  NORMAL,
-  ALERTA_TEMPERATURA,
-  ALERTA_ABERTURA,
-  ALERTA_IMPACTO
+struct LeiturasSensores {
+  float temperatura_c;
+  int luminosidade_digital;  // Valor binario do LDR: 0 ou 1.
+  float accel_x;
+  float accel_y;
+  float accel_z;
+  float gyro_x;
+  float gyro_y;
+  float gyro_z;
+  float temp_mpu_c;  // Temperatura interna do chip MPU6050, apenas debug.
+  bool ds18b20_disponivel;
+  bool mpu_disponivel;
 };
 
-String estadoParaTexto(EstadoSistema estado);
-void publicar(const char *topico, const String &payload, bool retido = false);
-void aplicarAtuadores(EstadoSistema estado);
-void tratarComando(char *topico, byte *payload, unsigned int length);
-void conectarWifiSeNecessario();
-void conectarMqttSeNecessario();
-float lerTemperaturaC();
-float lerAceleracaoTotal();
-EstadoSistema classificarEstado(float temperaturaC, int luminosidade, float aceleracaoTotal);
-void publicarAlertas(EstadoSistema estado);
-void cicloSensores();
+void iniciarDs18b20();
+void iniciarLdrDigital();
+void iniciarMpu6050();
+LeiturasSensores lerSensores();
+void imprimirLeiturasSerial(const LeiturasSensores &leituras);
 
-String estadoParaTexto(EstadoSistema estado) {
-  switch (estado) {
-    case ALERTA_TEMPERATURA:
-      return "ALERTA_TEMPERATURA";
-    case ALERTA_ABERTURA:
-      return "ALERTA_ABERTURA";
-    case ALERTA_IMPACTO:
-      return "ALERTA_IMPACTO";
-    case NORMAL:
-    default:
-      return "NORMAL";
-  }
-}
-
-void publicar(const char *topico, const String &payload, bool retido) {
-  if (mqttClient.connected()) {
-    mqttClient.publish(topico, payload.c_str(), retido);
-  }
-}
-
-void aplicarAtuadores(EstadoSistema estado) {
-  bool haAlerta = estado != NORMAL;
-  digitalWrite(LED_PIN, haAlerta ? HIGH : LOW);
-
-  bool buzzerLigado = buzzerForcado || (haAlerta && !buzzerSilenciado);
-  digitalWrite(BUZZER_PIN, buzzerLigado ? HIGH : LOW);
-}
-
-void tratarComando(char *topico, byte *payload, unsigned int length) {
-  String mensagem;
-  for (unsigned int i = 0; i < length; i++) {
-    mensagem += (char)payload[i];
-  }
-  mensagem.trim();
-  mensagem.toUpperCase();
-
-  String topicoRecebido = String(topico);
-  Serial.print("Comando MQTT recebido em ");
-  Serial.print(topicoRecebido);
-  Serial.print(": ");
-  Serial.println(mensagem);
-
-  if (topicoRecebido == TOPICO_CMD_BUZZER) {
-    if (mensagem == "ON") {
-      buzzerForcado = true;
-      buzzerSilenciado = false;
-    } else if (mensagem == "OFF") {
-      buzzerForcado = false;
-      buzzerSilenciado = true;
-      digitalWrite(BUZZER_PIN, LOW);
-    }
-  }
-
-  if (topicoRecebido == TOPICO_CMD_RESET && mensagem == "RESET") {
-    buzzerForcado = false;
-    buzzerSilenciado = false;
-    publicar(TOPICO_ESTADO, "RESET_ALERTA");
-    digitalWrite(BUZZER_PIN, LOW);
-  }
-}
-
-void conectarWifiSeNecessario() {
-  if (WiFi.status() == WL_CONNECTED) {
-    return;
-  }
-
-  unsigned long agora = millis();
-  if (agora - ultimaTentativaWifi < WIFI_RETRY_INTERVAL_MS) {
-    return;
-  }
-  ultimaTentativaWifi = agora;
-
-  Serial.print("Conectando ao Wi-Fi: ");
-  Serial.println(WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-}
-
-void conectarMqttSeNecessario() {
-  if (WiFi.status() != WL_CONNECTED || mqttClient.connected()) {
-    return;
-  }
-
-  unsigned long agora = millis();
-  if (agora - ultimaTentativaMqtt < MQTT_RETRY_INTERVAL_MS) {
-    return;
-  }
-  ultimaTentativaMqtt = agora;
-
-  Serial.print("Conectando ao MQTT em ");
-  Serial.println(MQTT_BROKER);
-
-  if (mqttClient.connect(MQTT_CLIENT_ID)) {
-    Serial.println("MQTT conectado.");
-    mqttClient.subscribe(TOPICO_CMD_BUZZER);
-    mqttClient.subscribe(TOPICO_CMD_RESET);
-    publicar(TOPICO_ESTADO, "ONLINE", true);
-  } else {
-    Serial.print("Falha MQTT, codigo=");
-    Serial.println(mqttClient.state());
-  }
-}
-
-float lerTemperaturaC() {
-  ds18b20.requestTemperatures();
-  return ds18b20.getTempCByIndex(0);
-}
-
-float lerAceleracaoTotal() {
-  if (!mpuDisponivel) {
-    return ACELERACAO_GRAVIDADE_MS2;
-  }
-
-  sensors_event_t aceleracao;
-  sensors_event_t giro;
-  sensors_event_t temperatura;
-  mpu.getEvent(&aceleracao, &giro, &temperatura);
-
-  float x = aceleracao.acceleration.x;
-  float y = aceleracao.acceleration.y;
-  float z = aceleracao.acceleration.z;
-  return sqrt((x * x) + (y * y) + (z * z));
-}
-
-EstadoSistema classificarEstado(float temperaturaC, int luminosidade, float aceleracaoTotal) {
-  if (temperaturaC == DEVICE_DISCONNECTED_C || temperaturaC < TEMPERATURA_MIN_C || temperaturaC > TEMPERATURA_MAX_C) {
-    return ALERTA_TEMPERATURA;
-  }
-
-  if (luminosidade > LIMIAR_LUMINOSIDADE) {
-    return ALERTA_ABERTURA;
-  }
-
-  if (mpuDisponivel && aceleracaoTotal > LIMIAR_ACELERACAO_MS2) {
-    return ALERTA_IMPACTO;
-  }
-
-  return NORMAL;
-}
-
-void publicarAlertas(EstadoSistema estado) {
-  publicar(TOPICO_ALERTA_TEMP, estado == ALERTA_TEMPERATURA ? "TEMPERATURA_FORA_DA_FAIXA" : "OK");
-  publicar(TOPICO_ALERTA_ABERTURA, estado == ALERTA_ABERTURA ? "ABERTURA_OU_LUMINOSIDADE_DETECTADA" : "OK");
-  publicar(TOPICO_ALERTA_IMPACTO, estado == ALERTA_IMPACTO ? "IMPACTO_OU_VIBRACAO_DETECTADO" : "OK");
-}
-
-void cicloSensores() {
-  float temperaturaC = lerTemperaturaC();
-  int luminosidade = analogRead(LDR_PIN);
-  float aceleracaoTotal = lerAceleracaoTotal();
-  EstadoSistema estado = classificarEstado(temperaturaC, luminosidade, aceleracaoTotal);
-  String tampa = luminosidade > LIMIAR_LUMINOSIDADE ? "TAMPA_ABERTA" : "TAMPA_FECHADA";
-  String payloadTemperatura = temperaturaC == DEVICE_DISCONNECTED_C ? "ERRO_SENSOR_TEMPERATURA" : String(temperaturaC, 2);
-  String payloadAceleracao = mpuDisponivel ? String(aceleracaoTotal, 2) : "MPU6050_INDISPONIVEL";
-
-  Serial.print("Temperatura C: ");
-  Serial.println(payloadTemperatura);
-  Serial.print("Luminosidade: ");
-  Serial.println(luminosidade);
-  Serial.print("Aceleracao total m/s2: ");
-  Serial.println(payloadAceleracao);
-  Serial.print("Estado: ");
-  Serial.println(estadoParaTexto(estado));
-
-  publicar(TOPICO_TEMP, payloadTemperatura);
-  publicar(TOPICO_LUZ, String(luminosidade));
-  publicar(TOPICO_ACEL, payloadAceleracao);
-  publicar(TOPICO_TAMPA, tampa);
-  publicar(TOPICO_ESTADO, estadoParaTexto(estado));
-  publicarAlertas(estado);
-  aplicarAtuadores(estado);
-}
-
-void setup() {
-  Serial.begin(115200);
-  delay(200);
-
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(LDR_PIN, INPUT);
-  digitalWrite(LED_PIN, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
-
+void iniciarDs18b20() {
   ds18b20.begin();
+  Serial.println("DS18B20 iniciado no GPIO 4.");
+}
+
+void iniciarLdrDigital() {
+  pinMode(LDR_DIGITAL_PIN, INPUT);
+  Serial.println("LDR digital iniciado no GPIO 27. Leitura binaria: 0 ou 1.");
+}
+
+void iniciarMpu6050() {
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
+  // XDA, XCL, AD0 e INT nao sao usados nesta montagem inicial.
   if (mpu.begin()) {
     mpuDisponivel = true;
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-    Serial.println("MPU6050 inicializado.");
+    Serial.println("MPU6050 iniciado em SDA GPIO 21 / SCL GPIO 22.");
   } else {
     mpuDisponivel = false;
-    Serial.println("Aviso: MPU6050 nao encontrado. Firmware continuara sem leitura de aceleracao.");
+    Serial.println("Erro: MPU6050 nao encontrado no barramento I2C.");
+  }
+}
+
+LeiturasSensores lerSensores() {
+  LeiturasSensores leituras = {};
+
+  ds18b20.requestTemperatures();
+  leituras.temperatura_c = ds18b20.getTempCByIndex(0);
+  leituras.ds18b20_disponivel = leituras.temperatura_c != DEVICE_DISCONNECTED_C;
+
+  leituras.luminosidade_digital = digitalRead(LDR_DIGITAL_PIN);
+
+  leituras.mpu_disponivel = mpuDisponivel;
+  if (mpuDisponivel) {
+    sensors_event_t accel;
+    sensors_event_t gyro;
+    sensors_event_t temp;
+    mpu.getEvent(&accel, &gyro, &temp);
+
+    leituras.accel_x = accel.acceleration.x;
+    leituras.accel_y = accel.acceleration.y;
+    leituras.accel_z = accel.acceleration.z;
+    leituras.gyro_x = gyro.gyro.x;
+    leituras.gyro_y = gyro.gyro.y;
+    leituras.gyro_z = gyro.gyro.z;
+    leituras.temp_mpu_c = temp.temperature;
   }
 
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(tratarComando);
-  conectarWifiSeNecessario();
+  return leituras;
+}
+
+void imprimirLeiturasSerial(const LeiturasSensores &leituras) {
+  Serial.println("----- leituras -----");
+
+  Serial.print("temperatura_c: ");
+  if (leituras.ds18b20_disponivel) {
+    Serial.println(leituras.temperatura_c, 2);
+  } else {
+    Serial.println("ERRO_DS18B20");
+  }
+
+  Serial.print("luminosidade_digital: ");
+  Serial.println(leituras.luminosidade_digital);
+
+  if (leituras.mpu_disponivel) {
+    Serial.print("accel_x: ");
+    Serial.println(leituras.accel_x, 4);
+    Serial.print("accel_y: ");
+    Serial.println(leituras.accel_y, 4);
+    Serial.print("accel_z: ");
+    Serial.println(leituras.accel_z, 4);
+    Serial.print("gyro_x: ");
+    Serial.println(leituras.gyro_x, 4);
+    Serial.print("gyro_y: ");
+    Serial.println(leituras.gyro_y, 4);
+    Serial.print("gyro_z: ");
+    Serial.println(leituras.gyro_z, 4);
+    Serial.print("temp_mpu_c: ");
+    Serial.println(leituras.temp_mpu_c, 2);
+  } else {
+    Serial.println("accel_x: MPU6050_INDISPONIVEL");
+    Serial.println("accel_y: MPU6050_INDISPONIVEL");
+    Serial.println("accel_z: MPU6050_INDISPONIVEL");
+    Serial.println("gyro_x: MPU6050_INDISPONIVEL");
+    Serial.println("gyro_y: MPU6050_INDISPONIVEL");
+    Serial.println("gyro_z: MPU6050_INDISPONIVEL");
+    Serial.println("temp_mpu_c: MPU6050_INDISPONIVEL");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  Serial.println();
+  Serial.println("Teste de sensores da caixa termica IoT");
+  Serial.println("Alimentacao dos sensores: 3V3 e GND comum.");
+
+  iniciarDs18b20();
+  iniciarLdrDigital();
+  iniciarMpu6050();
 }
 
 void loop() {
-  conectarWifiSeNecessario();
-  conectarMqttSeNecessario();
-  mqttClient.loop();
-
   unsigned long agora = millis();
   if (agora - ultimoCicloSensores >= SENSOR_INTERVAL_MS) {
     ultimoCicloSensores = agora;
-    cicloSensores();
+    LeiturasSensores leituras = lerSensores();
+    imprimirLeiturasSerial(leituras);
   }
 }

@@ -13,24 +13,11 @@ firmware/caixa_termica_esp32/
     └── main.cpp
 ```
 
-O arquivo `src/main.cpp` contem a logica de leitura dos sensores, classificacao de estado, publicacao MQTT e recebimento de comandos. Ele inclui `config.h`, que deve ser criado localmente a partir de `include/config.example.h`.
+O arquivo `src/main.cpp` contem a logica de leitura dos sensores e impressao das leituras no Serial Monitor. Nesta etapa, o firmware ainda nao publica MQTT; as leituras foram organizadas para facilitar essa integracao depois.
 
 ## Configuracao
 
-```bash
-cd firmware/caixa_termica_esp32
-cp include/config.example.h include/config.h
-```
-
-Depois, preencher no `include/config.h`:
-
-- `WIFI_SSID`
-- `WIFI_PASSWORD`
-- `MQTT_BROKER`
-- `MQTT_PORT`
-- `MQTT_CLIENT_ID`
-
-Nao colocar credenciais reais em arquivos versionados.
+Para o teste atual via Serial Monitor, nao e necessario configurar Wi-Fi nem MQTT. Quando a integracao MQTT voltar, crie `include/config.h` a partir de `include/config.example.h` e nao coloque credenciais reais em arquivos versionados.
 
 ## Build, upload e monitor
 
@@ -56,7 +43,6 @@ pio device monitor
 
 As bibliotecas do firmware principal estao declaradas em `platformio.ini`:
 
-- `knolleary/PubSubClient`
 - `paulstoffregen/OneWire`
 - `milesburton/DallasTemperature`
 - `adafruit/Adafruit MPU6050`

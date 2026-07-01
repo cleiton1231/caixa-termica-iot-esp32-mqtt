@@ -6,7 +6,7 @@ Porta: `1883`
 | Topico | Direcao para o ESP32 | Payload | Exemplo | Uso |
 |---|---|---|---|---|
 | `iot/caixa_termica/telemetria/temperatura` | Publica | Texto numerico em Celsius | `5.80` | Informar temperatura medida pelo DS18B20 |
-| `iot/caixa_termica/telemetria/luminosidade` | Publica | Texto numerico analogico | `2450` | Informar leitura do LDR |
+| `iot/caixa_termica/telemetria/luminosidade` | Publica | Texto numerico digital | `1` | Informar leitura binaria do LDR |
 | `iot/caixa_termica/telemetria/aceleracao` | Publica | Texto numerico em m/s2 | `10.12` | Informar aceleracao total calculada |
 | `iot/caixa_termica/status/tampa` | Publica | Texto | `TAMPA_ABERTA` | Indicar estado estimado da tampa |
 | `iot/caixa_termica/status/estado` | Publica | Texto | `NORMAL` | Indicar estado geral do sistema |
