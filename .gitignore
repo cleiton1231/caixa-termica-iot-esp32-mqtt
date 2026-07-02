@@ -37,6 +37,7 @@ evidence/
 # Testes locais fora do versionamento
 testes_locais/
 HISTORY.md
+extras-locais.tar.gz
 
 # Relatórios gerados
 *.pdf
