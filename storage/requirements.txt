@@ -1,3 +1,8 @@
-paho-mqtt
-mysql-connector-python
-python-dotenv
+# Cliente MQTT usado em mqtt_subscriber.py e mqtt_to_mysql.py.
+paho-mqtt>=1.6,<3
+
+# Conector MySQL/MariaDB usado em test_mysql.py e mqtt_to_mysql.py.
+mysql-connector-python>=9,<10
+
+# Leitura de variaveis locais em storage/.env.
+python-dotenv>=1,<2

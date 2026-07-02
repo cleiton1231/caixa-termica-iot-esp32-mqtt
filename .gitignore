@@ -15,6 +15,7 @@ venv/
 
 # Arduino / ESP32
 .pio/
+firmware/.remover_*/
 firmware/caixa_termica_simulador_esp32/
 *.bin
 *.elf
@@ -35,6 +36,7 @@ evidence/
 
 # Testes locais fora do versionamento
 testes_locais/
+HISTORY.md
 
 # Relatórios gerados
 *.pdf
