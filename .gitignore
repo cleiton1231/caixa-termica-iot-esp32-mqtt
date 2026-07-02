@@ -33,6 +33,9 @@ secrets.h
 # Evidencias locais
 evidence/
 
+# Testes locais fora do versionamento
+testes_locais/
+
 # Relatórios gerados
 *.pdf
 *.docx
